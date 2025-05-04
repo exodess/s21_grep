@@ -1,10 +1,6 @@
 #ifndef S21_GREP_FLAGS_H
 #define S21_GREP_FLAGS_H
 
-// флаг -f (--file) должен стоят в конце каждого списка!
-
-
-
 	#define GNU_FLAG_E "regexp"				// шаблон
 #define GNU_FLAG_I "ignore-case" 			// игнорирование регистра
 	#define GNU_FLAG_V "invert-match"		// ищем несовпадения
