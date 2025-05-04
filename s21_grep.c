@@ -14,15 +14,25 @@
 #define MODEFL(ch) modes[strchr(FLAGS, *#ch) - FLAGS]
 #define PRINT 1
 #define TEST 0
-#define ERR_WITHOUT_ARG -2 // если у ключей -f или -e нет аргумента
-#define ERR_PATTERN_FILE_NF -3 // not found 
+#define ERR_WITHOUT_ARG -2 		// если у ключей -f или -e нет аргумента
+#define ERR_PATTERN_FILE_NF -3  // указанный файл не существует или не может быть открыт
+#define ERR_BAD_FLAG -4 		// неправильно указан флаг
+#define ERR_NOT_PATTERNS -5		// не указан шаблон 
+#define ERR_FLAG_F "-f"
+#define ERR_FLAG_E "-e"
 
-int processing_input(int, char *[], struct option [COUNT_FLAGS],
-					int mode[COUNT_FLAGS], LIST **, LIST **);
+
+typedef struct {
+	char * flag; // с каким флагом связана ошибка
+	int number; // номер ошибки
+} err_t; 
+
+void printFlags(int [COUNT_FLAGS + 1]);
+void tolowerstr(char *); // переводит строку в нижний регистр
+int countNodes(LIST *); // подсчитывает количество элементов в списке (файлы или шаблоны)
+int processing_input(int, char *[], int mode[COUNT_FLAGS], LIST **, LIST **);
 void processing_modes(int [COUNT_FLAGS], int);
-long find_newline(FILE *, long);
 void printNameFile(char * name, int flag);
-int countFiles(LIST *);
 int readln(char **, FILE *, int *);
 int match_template(char *, char *, int *, int);
 void printLineColors(char *, int, int);
@@ -31,10 +41,8 @@ int main(int argc, char * argv[])
 {
 	LIST * list_file, * list_patterns;
 	FILE * fp = NULL;
-	struct option long_options[COUNT_FLAGS + 1];
 	int len = 1;
 	char * buffer = malloc(len * sizeof(char));
-	*buffer = ' ';
 	
 	int modes[COUNT_FLAGS + 1] = {0};
 	// 				| <--	 			COUNT_FLAGS			 	 	 -->|
@@ -44,29 +52,37 @@ int main(int argc, char * argv[])
 	
 	init(&list_file);
 	init(&list_patterns);
-	
-	if(processing_input(argc, argv, long_options, modes, &list_patterns, &list_file)){
+
+
+	if(processing_input(argc, argv, modes, &list_patterns, &list_file) == 0){
 		
-		processing_modes(modes, countFiles(list_file));
-		
-		if(list_file -> name == NULL) push(&list_file, "-");
+		processing_modes(modes, countNodes(list_file));
+		// printFlags(modes);
+		// printList(list_patterns);
+		// puts("----");
+		// printList(list_file);
 		
 		while(list_file -> name != NULL) {
-		
-			if(strcmp(list_file -> name, "-") == 0) fp = stdin;
+			fp = (strcmp(list_file -> name, "-") == 0) ? stdin : fopen(list_file -> name, "r");
 			
-			if((fp == stdin) || (fp = fopen(list_file -> name, "r")) != NULL) {
+			if(fp != NULL) {
 				int rez = 1, numberln = 1, countlns = 0;
 				
-				while(rez){
+				while(rez){ // считывание содержимого файла построчно
 					rez = readln(&buffer, fp, &len);
 					
-					/*if((*buffer != '\0') && match_template(buffer, patterns, modes, TEST) ^ MODEFL(v)){ // нужная строка
-						if(MODEFL(P) && !MODEFL(h)) printNameFile(list_file -> name, 1);
-						if(MODEFL(P) && MODEFL(n)) printf("%d:", numberln);
-						if(MODEFL(P)) match_template(buffer, patterns, modes, PRINT);
-						countlns++;
-					}*/
+					LIST * lp = list_patterns;
+					while(lp -> name != NULL){
+						// ищем совпадение среди списка шаблонов
+						if((*buffer != '\0') && match_template(buffer, lp -> name, modes, TEST) ^ MODEFL(v)){ // нужная строка
+							if(MODEFL(P) && !MODEFL(h)) printNameFile(list_file -> name, 1);
+							if(MODEFL(P) && MODEFL(n)) printf("%d:", numberln);
+							if(MODEFL(P)) match_template(buffer, lp -> name, modes, PRINT);
+							countlns++;
+						}
+
+						lp = lp -> next; 
+					}
 					numberln += (*buffer != '\0');
 				}
 
@@ -78,7 +94,7 @@ int main(int argc, char * argv[])
 
 				if(fp != stdin) fclose(fp);
 			}
-			else if(!MODEFL(s)) fprintf(stderr, "grep: %s: нет такого файла\n", list_file -> name);
+			else if(!MODEFL(s)) fprintf(stderr, "grep: %s: Нет такого файла или каталога\n", list_file -> name);
 
 			pop(&list_file);
 
@@ -86,33 +102,152 @@ int main(int argc, char * argv[])
 	}
 	
 	else printf("Использование: grep [ПАРАМЕТР]… ШАБЛОНЫ [ФАЙЛ]…\n");
-
+	
 	free(buffer);
 	destroy(&list_file);
 	destroy(&list_patterns);
+	
 	return 0;
 }
+
+
+int processing_input(int argc, char * argv[], int modes [COUNT_FLAGS], LIST ** list_patt, LIST ** list_files)
+{
+
+	struct option long_options[COUNT_FLAGS + 1];
+	int rez, opt_index;
+	err_t err = {NULL, 0};
+	
+	for(int i = 0; i < COUNT_FLAGS; i++) {
+		long_options[i].name = GNU_FLAGS[i];
+		long_options[i].has_arg = no_argument;
+		long_options[i].flag = &modes[i];
+		long_options[i].val = 1;
+	}
+	
+	long_options[COUNT_FLAGS - 1].has_arg = required_argument;
+	long_options[0].has_arg = required_argument;
+	long_options[COUNT_FLAGS].name = NULL;
+	long_options[COUNT_FLAGS].has_arg = 0;
+	long_options[COUNT_FLAGS].flag = NULL;
+	long_options[COUNT_FLAGS].val = 0;
+
+	opterr = 0; // не выводим ошибки
+	opt_index = -1;
+	while((rez = getopt_long(argc, argv, FLAGS_OPT, long_options, &opt_index)) != -1) {
+	
+		// printf("rez: %c[%d], opt_index = %c[%d], optarg = %s\n", rez, rez, opt_index, opt_index, optarg);
+
+		rez = (rez == 0) ? FLAGS[opt_index] : rez;
+		int flag = (rez != 0); // длинный или короткий параметр
+		if(strchr(FLAGS, rez) != NULL && rez != 'P') { // короткое название
+			for(int i = 0; i < COUNT_FLAGS; i++) modes[i] += (modes[i]) ? 0 : (rez == FLAGS[i]);
+
+			if(rez == 'e') {
+				if(optarg == NULL) { 
+					if(flag) err.flag = GNU_FLAG_E;
+					else err.flag = ERR_FLAG_E; 
+					err.number = ERR_WITHOUT_ARG; 
+				}
+				else push(list_patt, optarg);
+			}
+			if(rez == 'f') {
+				if(optarg == NULL) { 
+						if(flag) err.flag = GNU_FLAG_F;
+						else err.flag = ERR_FLAG_F;
+						err.number = ERR_WITHOUT_ARG;
+					}
+				else {
+					// параметр -f идет вместе с аргументом
+					FILE * fp = fopen(optarg, "r");
+					if(fp == NULL) { 
+						err.number = ERR_PATTERN_FILE_NF; 
+					}
+					else {
+						// файл существует и открывается
+						int len = 1, rez = 1;
+						char * buffer = malloc(len * sizeof(char));
+
+						// чтение всех шаблонов из файла
+						while(rez){
+							rez = readln(&buffer, fp, &len);
+							if(strchr(buffer, '\n') != NULL) *(strchr(buffer, '\n')) = '\0';
+							push(list_patt, buffer);
+						}
+						fclose(fp);
+						free(buffer);
+					}
+				}
+						
+			}
+
+		}
+		else err.number = ERR_BAD_FLAG;
+		opt_index = -1;
+	}
+	if(err.number == 0){
+		for(int i = (argc - 1); i > 0; i--) {
+			if(strcmp(argv[i], "-e") == 0 || strcmp(argv[i], "-f") == 0) 
+				pop(list_files); // предыдущий аргумент относился к флагу -e или -f (которые требуют значение)
+
+			else if(strcmp(argv[i], "-") == 0 || argv[i][0] != '-'){
+				push(list_files, argv[i]);
+			}
+		}
+		if(countNodes(*list_patt) == 0 && countNodes(*list_files) == 0) err.number = (err.number == 0) ? ERR_NOT_PATTERNS : err.number;
+		else if(countNodes(*list_patt) == 0 && countNodes(*list_files) > 0) push(list_patt, pop(list_files));
+		
+		if(countNodes(*list_files) == 0) push(list_files, "-");
+	}
+	rez = err.number;
+	
+	if(err.number != 0) {
+		if(err.number == ERR_WITHOUT_ARG) printf("Флаг \"%s\" должен иметь аргумент!\n", err.flag);
+		else if(err.number == ERR_PATTERN_FILE_NF) printf("Файла не существует!\n");
+		else if(err.number == ERR_BAD_FLAG) printf("Ошибочный флаг!\n");
+	}
+	return rez;
+}
+
+
+int readln(char ** buffer, FILE * fp, int * len)
+{
+	// если считан EOF, вернется 0, иначе 1
+	char ch = ' ';
+	int j = 0;
+	while((ch = fgetc(fp)) != '\n' && ch != EOF) {
+		if((j + 2) >= *len) {
+			char * temp = malloc((*len + 20)*sizeof(char));
+			strncpy(temp, *buffer, j);
+			free(*buffer);
+			*buffer = temp;
+			*len += 20;
+		}
+		(*buffer)[j] = ch;
+		j++;
+	}
+	if(ch == '\n'){
+		(*buffer)[j] = '\n';
+		(*buffer)[j + 1] = '\0';
+	}
+	else (*buffer)[j] = '\0';
+	
+	return (ch != EOF);
+}
+
 
 int match_template(char * str, char * pattern, int * modes, int PFLAG)
 {
 	int rez = 0;
-	char * temp = NULL;
-	
-	if(MODEFL(i)) {
+	char * temp = str;
+	if(MODEFL(i)) { // не обращать внимание на регистр
+		// tolowerstr() для шаблонов должна быть вызвана
+		// в функции processing_input()
 		char * cpstr = malloc((strlen(str) + 1) * sizeof(*str));
-		
-		while(str[rez] != '\0') {
-			cpstr[rez] = tolower(str[rez]);
-			rez++;
-		}
-		rez = 0;
-		while(pattern[rez] != '\0') {
-			pattern[rez] = tolower(pattern[rez]);
-			rez++;
-		}
+		strcpy(cpstr, str);
+		tolowerstr(cpstr);
 		temp = strstr(cpstr, pattern);
 		rez = (temp != NULL) ? (temp - cpstr) : -1;
-		
 		free(cpstr);
 	}
 	else {
@@ -120,7 +255,7 @@ int match_template(char * str, char * pattern, int * modes, int PFLAG)
 		rez = (temp != NULL) ? (temp - str) : -1;
 	}
 	if(PFLAG == PRINT) {
-		if(MODEFL(o)) { 
+		if(MODEFL(o)){
 			strncpy(str, str + rez, strlen(pattern));
 			*(str + strlen(pattern)) = '\n';
 			*(str + strlen(pattern) + 1) = '\0';
@@ -128,12 +263,18 @@ int match_template(char * str, char * pattern, int * modes, int PFLAG)
 		}
 		#ifdef WITHOUT_COLOR
 			printf("%s", str);
-		#else
+		#else 
 			printLineColors(str, rez, rez + (rez != -1) * strlen(pattern));
 		#endif
 	}
+
 	return (rez != -1) && (*str != '\0');
 }
+
+
+// -------------------------------------------------------------------------------------------------
+// эти функции работают нормально
+
 
 void printLineColors(char * str, int start_drow_point, int stop_drow_point)
 {
@@ -148,103 +289,17 @@ void printLineColors(char * str, int start_drow_point, int stop_drow_point)
 	}
 }
 
-int readln(char ** buffer, FILE * fp, int * len)
-{
-	// если считан EOF, вернется 0, иначе 1
-	char ch = ' ';
-	int j = 0;
-	while((ch = fgetc(fp)) != '\n' && ch != EOF) {
-		if((j + 1) == *len) {
-			char * temp = malloc((*len + 20)*sizeof(char));
-			strncpy(temp, *buffer, j);
-			free(*buffer);
-			*buffer = temp;
-			*len += 20;
-		}
-		(*buffer)[j] = ch;
-		j++;
-	}
-	if(ch == '\n') {
-		(*buffer)[j] = '\n';
-		(*buffer)[j + 1] = '\0';	
-	}
-	else (*buffer)[j] = '\0';
-	
-	return (ch != EOF);
-}
-
-int processing_input(int argc, char * argv[],
-	struct option long_options[COUNT_FLAGS], int modes [COUNT_FLAGS],  
-	LIST ** list_patt, LIST ** list_files)
-{
-	
-	int rez;
-	int err = 0;
-	int opt_index;
-	for(int i = 0; i < COUNT_FLAGS; i++) {
-		long_options[i].name = GNU_FLAGS[i];
-		long_options[i].has_arg = no_argument;
-		long_options[i].flag = &modes[i];
-		long_options[i].val = 1;
-	}
-	
-	long_options[COUNT_FLAGS - 1].has_arg = required_argument;
-	long_options[0].has_arg = required_argument;
-	
-	long_options[COUNT_FLAGS].name = NULL;
-	long_options[COUNT_FLAGS].has_arg = 0;
-	long_options[COUNT_FLAGS].flag = NULL;
-	long_options[COUNT_FLAGS].val = 0;
-
-	opterr = 0; // не выводим ошибки
-	while((rez = getopt_long(argc, argv, FLAGS_OPT, long_options, &opt_index)) != -1) {
-		if(strchr(FLAGS, rez) != NULL && rez != 'P') { // короткое название
-			
-			for(int i = 0; i < COUNT_FLAGS; i++)
-				modes[i] += (modes[i]) ? 0 : (rez == FLAGS[i]);
-
-			
-			if(rez == 'e' || opt_index == 'e'){
-					if(optarg == NULL) err = ERR_WITHOUT_ARG;
-					else push(list_patt, optarg);
-			}
-				/*case 'f': {
-					if(optarg == NULL) err = ERR_WITHOUT_ARG;
-					else {
-						FILE * fp = fopen(optarg, "r");
-						if(fp == NULL) err = ERR_PATTERN_FILE_NF;
-					}
-				}*/
-			
-		}
-		else printf("Неправильный флагс - %c!", rez);
-	}
-
-	printList(*list_patt);
-	printList(*list_files);
-	
-	if(err == 0){
-		printf("It's OK!");
-	}
-	else rez = err;
-	printf("%d", err);
-	return rez;
-}
 
 void processing_modes(int modes[COUNT_FLAGS], int count_file)
 {
+	MODEFL(P) = 1;
 	if(MODEFL(h) == 0) MODEFL(h) = (count_file > 1) ? 0 : 1;	
 	
 	if(MODEFL(l)) {
 		MODEFL(h) = 0;
 		MODEFL(c) = 0;
 	}
-
-/*	if(MODEFL(v)) {
-		MODEFL(c) = (MODEFL(c)) ? 1 : ;
-		MODEFL(n) = (MODEFL(n)) ? -1 : 0;		
-	}
-*/
+	
 	MODEFL(P) = !MODEFL(l) && !MODEFL(c);
 	MODEFL(P) = MODEFL(P) ^ (MODEFL(v) && MODEFL(o));
 	MODEFL(h) = (MODEFL(v) && MODEFL(o)) ? 1 : MODEFL(h);
@@ -252,7 +307,7 @@ void processing_modes(int modes[COUNT_FLAGS], int count_file)
 }
 
 
-int countFiles(LIST * root)
+int countNodes(LIST * root)
 {
 	int j = 0;
 	while(root -> name != NULL) {
@@ -261,6 +316,7 @@ int countFiles(LIST * root)
 	}
 	return j;
 }
+
 
 void printNameFile(char * name, int flag)
 {	
@@ -276,4 +332,23 @@ void printNameFile(char * name, int flag)
 		#else
 			printf("%s%s%s\n", PURPLE, name, ESC);
 		#endif
+}
+
+
+void tolowerstr(char * str)
+{
+	int j = 0;
+	while(str[j] != '\0') {
+		str[j] = tolower(str[j]);
+		j++;
+	}
+}
+
+
+void printFlags(int  modes[COUNT_FLAGS + 1])
+{
+	for(int i = 0; i < COUNT_FLAGS + 1; i++) printf("|%c|", FLAGS[i]);
+	printf("\n");
+	for(int i = 0; i < COUNT_FLAGS + 1; i++) printf("|%d|", modes[i]);
+	printf("\n");
 }
