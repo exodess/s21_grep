@@ -70,15 +70,16 @@ int main(int argc, char * argv[])
 				
 				while(rez){ // считывание содержимого файла построчно
 					rez = readln(&buffer, fp, &len);
-					
+					int flag_exit = 0;
 					LIST * lp = list_patterns;
-					while(lp -> name != NULL){
+					while(lp -> name != NULL && !flag_exit){
 						// ищем совпадение среди списка шаблонов
 						if((*buffer != '\0') && match_template(buffer, lp -> name, modes, TEST) ^ MODEFL(v)){ // нужная строка
 							if(MODEFL(P) && !MODEFL(h)) printNameFile(list_file -> name, 1);
 							if(MODEFL(P) && MODEFL(n)) printf("%d:", numberln);
 							if(MODEFL(P)) match_template(buffer, lp -> name, modes, PRINT);
 							countlns++;
+							flag_exit = 1;
 						}
 
 						lp = lp -> next; 
