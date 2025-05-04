@@ -23,9 +23,9 @@ for flag in "e" "i" "v" "c" "l" "n" "h" "s" "o" "f" \
 			"vi" "vos" "voh" "hos" "hlo" "ivsoh" "eiflff"
 	do 
 		# echo -ne "TEST $n. Flag = $flag\t:"
-		echo "Команда: ./s21_grep -$flag $templates $test_file > $file_s21"
+		echo "Команда: ./s21_grep -$flag $templates $test_file &> $file_s21"
 		./s21_grep -$flag $templates $test_file &> $file_s21 
-		echo "Команда: grep -$flag $templates $test_file > $file_grep"
+		echo "Команда: grep -$flag $templates $test_file &> $file_grep"
 		grep -$flag $templates $test_file &> $file_grep
 		echo -n "Результат: "
 		
