@@ -5,9 +5,9 @@
 #include <regex.h>
 #include <ctype.h>
 
-#include "../../common/list.h"
+#include "tools/list.h"
 #include "s21_grep_flags.h"
-#include "../../common/colors.h" // окрашивание ввода
+#include "tools/colors.h" // окрашивание ввода
 
 #define _GNU_SOURCE
 #define WITHOUT_COLOR
@@ -34,7 +34,7 @@ int processing_input(int, char *[], int mode[COUNT_FLAGS], LIST **, LIST **);
 void processing_modes(int [COUNT_FLAGS], int);
 void printNameFile(char * name, int flag);
 int readln(char **, FILE *, int *);
-void printLineColors(char *, int, int);
+
 
 int main(int argc, char * argv[])
 {
@@ -120,8 +120,13 @@ int main(int argc, char * argv[])
 								if(MODEFL(P)){
 									if(!MODEFL(h)) printf("%s:", list_file -> name);
 									if(MODEFL(n))  printf("%d:", numberln);
-									if(MODEFL(o)) printf("%s%.*s%s", ORANGE, plen, buffer + min_off + global_off, ORANGE);
-									else printf("%.*s%s%.*s%s", min_off, buffer + global_off, ORANGE, plen, buffer + global_off + min_off, ESC);
+									#ifndef WITHOUT_COLOR
+										if(MODEFL(o)) printf("%s%.*s%s", ORANGE, plen, buffer + min_off + global_off, ORANGE);
+										else printf("%.*s%s%.*s%s", min_off, buffer + global_off, ORANGE, plen, buffer + global_off + min_off, ESC);
+									#else 
+										if(MODEFL(o)) printf("%.*s", plen, buffer + min_off + global_off);
+										else printf("%.*s", min_off + plen, buffer + global_off);
+									#endif
 								}
 								countlns++;
 																	
@@ -131,8 +136,13 @@ int main(int argc, char * argv[])
 							// если рассматриваемая подстрока находится не в начале строки
 							// значит, было найдено хотя бы одно совпадение с шаблоном
 							if(!MODEFL(v) && MODEFL(P) ) {
-								if(MODEFL(o) && !flag_exit) printf("%s%.*s%s", ORANGE, plen, buffer + global_off + min_off, ESC);
-								else if(!MODEFL(o) && !flag_exit) printf("%.*s%s%.*s%s", min_off, buffer + global_off, ORANGE, plen, buffer + global_off + min_off, ESC);
+								#ifndef WITHOUT_COLOR
+									if(MODEFL(o) && !flag_exit) printf("\n%s%.*s%s", ORANGE, plen, buffer + global_off + min_off, ESC);
+									else if(!MODEFL(o) && !flag_exit) printf("%.*s%s%.*s%s", min_off, buffer + global_off, ORANGE, plen, buffer + global_off + min_off, ESC);
+								#else 
+									if(MODEFL(o) && !flag_exit) printf("\n%.*s", plen, buffer + global_off + min_off);
+									else if(!MODEFL(o) && !flag_exit) printf("%.*s", plen + min_off, buffer + global_off);
+								#endif
 								else if(!MODEFL(o)) printf("%.*s", min_off + plen, buffer + global_off);
 								else printf("\n");
 							}
@@ -233,7 +243,7 @@ int processing_input(int argc, char * argv[], int modes [COUNT_FLAGS], LIST ** l
 						while(rez){
 							rez = readln(&buffer, fp, &len);
 							if(strchr(buffer, '\n') != NULL) *(strchr(buffer, '\n')) = '\0';
-							push(list_patt, buffer);
+							if(*buffer != '\0') push(list_patt, buffer);
 						}
 						fclose(fp);
 						free(buffer);
@@ -298,20 +308,6 @@ int readln(char ** buffer, FILE * fp, int * len)
 	else (*buffer)[j] = '\0';
 	
 	return (ch != EOF);
-}
-
-
-void printLineColors(char * str, int start_drow_point, int stop_drow_point)
-{
-	int i = 0;
-
-	while(str[i] != '\0') {
-		if(i == start_drow_point) printf("%s%s", HARD_LIGHT, RED);
-		else if(i == stop_drow_point) printf("%s", ESC);
-		
-		printf("%c", str[i]);
-		i++;
-	}
 }
 
 
