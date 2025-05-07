@@ -12,8 +12,7 @@
 #define _GNU_SOURCE
 #define WITHOUT_COLOR
 #define MODEFL(ch) modes[strchr(FLAGS, *#ch) - FLAGS]
-#define PRINT 1
-#define TEST 0
+#define ARRAY_SIZE(arr) (sizeof((arr)) / sizeof((arr)[0]))
 #define ERR_WITHOUT_ARG -2 		// если у ключей -f или -e нет аргумента
 #define ERR_PATTERN_FILE_NF -3  // указанный файл не существует или не может быть открыт
 #define ERR_BAD_FLAG -4 		// неправильно указан флаг
@@ -27,6 +26,7 @@ typedef struct {
 	int number; // номер ошибки
 } err_t; 
 
+
 void printFlags(int [COUNT_FLAGS + 1]);
 void tolowerstr(char *); // переводит строку в нижний регистр
 int countNodes(LIST *); // подсчитывает количество элементов в списке (файлы или шаблоны)
@@ -34,7 +34,6 @@ int processing_input(int, char *[], int mode[COUNT_FLAGS], LIST **, LIST **);
 void processing_modes(int [COUNT_FLAGS], int);
 void printNameFile(char * name, int flag);
 int readln(char **, FILE *, int *);
-int match_template(char *, char *, int *, int);
 void printLineColors(char *, int, int);
 
 int main(int argc, char * argv[])
@@ -43,7 +42,8 @@ int main(int argc, char * argv[])
 	FILE * fp = NULL;
 	int len = 1;
 	char * buffer = malloc(len * sizeof(char));
-	
+
+	regmatch_t pmatch[1];
 	int modes[COUNT_FLAGS + 1] = {0};
 	// 				| <--	 			COUNT_FLAGS			 	 	 -->|
 	// 				| 					--------				    	|
@@ -53,38 +53,96 @@ int main(int argc, char * argv[])
 	init(&list_file);
 	init(&list_patterns);
 
-
+	// проверка на правильный ввод
 	if(processing_input(argc, argv, modes, &list_patterns, &list_file) == 0){
-		
+
+		// обработка флагов (убрать лишние и решить зависимости)
 		processing_modes(modes, countNodes(list_file));
-		// printFlags(modes);
-		// printList(list_patterns);
-		// puts("----");
-		// printList(list_file);
 		
+		LIST * lp = list_patterns;
+		int count_patt = countNodes(list_patterns);
+		regex_t * arr_reg = malloc((count_patt) * sizeof(regex_t));
+
+		// компиляция регулярных выражений из массива паттернов
+		for(int i = 0; i < count_patt; i++) {
+			if(MODEFL(i)) tolowerstr(lp -> name);
+			if(regcomp(&(arr_reg[i]), lp -> name, REG_NEWLINE)) exit(EXIT_FAILURE);
+			lp = lp -> next;
+			
+		}
 		while(list_file -> name != NULL) {
 			fp = (strcmp(list_file -> name, "-") == 0) ? stdin : fopen(list_file -> name, "r");
-			
+		
 			if(fp != NULL) {
+				
 				int rez = 1, numberln = 1, countlns = 0;
 				
 				while(rez){ // считывание содержимого файла построчно
-					rez = readln(&buffer, fp, &len);
-					int flag_exit = 0;
-					LIST * lp = list_patterns;
-					while(lp -> name != NULL && !flag_exit){
-						// ищем совпадение среди списка шаблонов
-						if((*buffer != '\0') && match_template(buffer, lp -> name, modes, TEST) ^ MODEFL(v)){ // нужная строка
-							if(MODEFL(P) && !MODEFL(h)) printNameFile(list_file -> name, 1);
-							if(MODEFL(P) && MODEFL(n)) printf("%d:", numberln);
-							if(MODEFL(P)) match_template(buffer, lp -> name, modes, PRINT);
-							countlns++;
-							flag_exit = 1;
-						}
-
-						lp = lp -> next; 
+					rez = readln(&buffer, fp, &len); // считали очередную строчку из файла
+					
+					regoff_t global_off = 0; // смещение относительно начала строки (для -i)
+					int flag_exit = (*buffer == '\0'); // флаг выхода для перехода к следующей строчке
+					char * fline = buffer; // buffer должна всегда указывать на первую ячейку, которую выделила malloc()
+					char * copy = NULL; // для строки buffer в нижнем регистре
+					if(MODEFL(i)) { // уменьшаем регистр строки в соответствие с флагом -i
+						// регистр шаблонов должен быть уменьшен до компиляции рег.выражений
+						copy = malloc((strlen(buffer) + 1) * sizeof(char));
+						strcpy(copy, buffer);
+						tolowerstr(copy);
+						fline = copy;
 					}
+					
+					while(!flag_exit){
+						// проходимся по строчке и ищем среди списка рег.выражений то, 
+						// которое находится ближе всех к началу строки
+						// выводим строчку до конечного символа найденного шаблона и сдвигаем строчку вперед до следующего символа
+						// проходимся так до тех пор, пока строка не будет иметь нулевую длину
+						// или не будет найдено ни одно совпадение с нашими шаблонами
+
+						regoff_t plen = 0, min_off = strlen(fline);
+
+						// поиск совпадений
+						for(int i = 0; i < count_patt; i++) {
+							if(regexec(&(arr_reg[i]), fline, ARRAY_SIZE(pmatch), pmatch, 0) == 0){
+								if(min_off > pmatch[0].rm_so) {
+									min_off = pmatch[0].rm_so;
+									plen = pmatch[0].rm_eo - pmatch[0].rm_so;
+								}
+								
+							}
+							// иначе если не найдено ни одно совпадение
+							else flag_exit = (i == (count_patt - 1)); 
+						}
+						
+						if((fline == buffer) || (fline == copy)) { // если рассматриваемая подстрока находится в начале строки
+							if((!flag_exit) ^ MODEFL(v))
+							{
+								if(MODEFL(P)){
+									if(!MODEFL(h)) printf("%s:", list_file -> name);
+									if(MODEFL(n))  printf("%d:", numberln);
+									if(MODEFL(o)) printf("%s%.*s%s", ORANGE, plen, buffer + min_off + global_off, ORANGE);
+									else printf("%.*s%s%.*s%s", min_off, buffer + global_off, ORANGE, plen, buffer + global_off + min_off, ESC);
+								}
+								countlns++;
+																	
+							}
+						}
+						else {
+							// если рассматриваемая подстрока находится не в начале строки
+							// значит, было найдено хотя бы одно совпадение с шаблоном
+							if(!MODEFL(v) && MODEFL(P) ) {
+								if(MODEFL(o) && !flag_exit) printf("%s%.*s%s", ORANGE, plen, buffer + global_off + min_off, ESC);
+								else if(!MODEFL(o) && !flag_exit) printf("%.*s%s%.*s%s", min_off, buffer + global_off, ORANGE, plen, buffer + global_off + min_off, ESC);
+								else if(!MODEFL(o)) printf("%.*s", min_off + plen, buffer + global_off);
+								else printf("\n");
+							}
+						}
+						  
+						fline += (min_off + plen);
+						global_off += min_off + plen;
+					}	
 					numberln += (*buffer != '\0');
+					if(copy != NULL) free(copy);
 				}
 
 				if(!MODEFL(P)) { // та информация, которая выводится в конце
@@ -92,14 +150,16 @@ int main(int argc, char * argv[])
 					else if(!MODEFL(h) && countlns) printNameFile(list_file -> name, 1);
 					if(MODEFL(c)) printf("%d\n", countlns);					
 				}
-
 				if(fp != stdin) fclose(fp);
 			}
+			
 			else if(!MODEFL(s)) fprintf(stderr, "grep: %s: Нет такого файла или каталога\n", list_file -> name);
 
 			pop(&list_file);
 
 		}
+
+		free(arr_reg);
 	}
 	
 	else printf("Использование: grep [ПАРАМЕТР]… ШАБЛОНЫ [ФАЙЛ]…\n");
@@ -211,6 +271,10 @@ int processing_input(int argc, char * argv[], int modes [COUNT_FLAGS], LIST ** l
 }
 
 
+// -------------------------------------------------------------------------------------------------
+// эти функции работают нормально
+
+
 int readln(char ** buffer, FILE * fp, int * len)
 {
 	// если считан EOF, вернется 0, иначе 1
@@ -235,46 +299,6 @@ int readln(char ** buffer, FILE * fp, int * len)
 	
 	return (ch != EOF);
 }
-
-
-int match_template(char * str, char * pattern, int * modes, int PFLAG)
-{
-	int rez = 0;
-	char * temp = str;
-	if(MODEFL(i)) { // не обращать внимание на регистр
-		// tolowerstr() для шаблонов должна быть вызвана
-		// в функции processing_input()
-		char * cpstr = malloc((strlen(str) + 1) * sizeof(*str));
-		strcpy(cpstr, str);
-		tolowerstr(cpstr);
-		temp = strstr(cpstr, pattern);
-		rez = (temp != NULL) ? (temp - cpstr) : -1;
-		free(cpstr);
-	}
-	else {
-		temp = strstr(str, pattern);
-		rez = (temp != NULL) ? (temp - str) : -1;
-	}
-	if(PFLAG == PRINT) {
-		if(MODEFL(o)){
-			strncpy(str, str + rez, strlen(pattern));
-			*(str + strlen(pattern)) = '\n';
-			*(str + strlen(pattern) + 1) = '\0';
-			rez = 0;
-		}
-		#ifdef WITHOUT_COLOR
-			printf("%s", str);
-		#else 
-			printLineColors(str, rez, rez + (rez != -1) * strlen(pattern));
-		#endif
-	}
-
-	return (rez != -1) && (*str != '\0');
-}
-
-
-// -------------------------------------------------------------------------------------------------
-// эти функции работают нормально
 
 
 void printLineColors(char * str, int start_drow_point, int stop_drow_point)
