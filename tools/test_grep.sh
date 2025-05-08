@@ -40,7 +40,6 @@ for flag in "e" "i" "v" "c" "l" "n" "h" "s" "o" "f" \
 				fail=$((fail + 1))
 		fi
 		
-		# echo $result
 		n=$((n + 1))
 	done
 
@@ -51,5 +50,7 @@ echo "Прохождение теста: $percent%"
 
 rm $file_s21
 rm $file_grep
+
 echo "Тесты завершены!"
+
 exit 0 
