@@ -207,8 +207,6 @@ int processing_input(int argc, char * argv[], int modes [COUNT_FLAGS], LIST ** l
 	opt_index = -1;
 	while((rez = getopt_long(argc, argv, FLAGS_OPT, long_options, &opt_index)) != -1) {
 	
-		// printf("rez: %c[%d], opt_index = %c[%d], optarg = %s\n", rez, rez, opt_index, opt_index, optarg);
-
 		rez = (rez == 0) ? FLAGS[opt_index] : rez;
 		int flag = (rez != 0); // длинный или короткий параметр
 		if(strchr(FLAGS, rez) != NULL && rez != 'P') { // короткое название
@@ -279,10 +277,6 @@ int processing_input(int argc, char * argv[], int modes [COUNT_FLAGS], LIST ** l
 	}
 	return rez;
 }
-
-
-// -------------------------------------------------------------------------------------------------
-// эти функции работают нормально
 
 
 int readln(char ** buffer, FILE * fp, int * len)
