@@ -10,6 +10,5 @@ void init(LIST **);
 void push(LIST ** root, char * name);
 char * pop(LIST ** root);
 void destroy(LIST **);
-void printList(LIST *);
 
 #endif
