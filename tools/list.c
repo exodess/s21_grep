@@ -37,16 +37,6 @@ char * pop(LIST ** root)
 	return temp;
 }
 
-void printList(LIST * root)
-{
-	LIST * temp = root;
-
-	while(temp -> name != NULL){
-		printf("%s\n", temp -> name);
-		temp = temp -> next;
-	}
-}
-
 void destroy(LIST ** root)
 {
 	LIST * temp = *root;
